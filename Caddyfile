@@ -1,5 +1,14 @@
-osm-downloads.protomaps.com {
-        root * /mnt/www
-        reverse_proxy /api/* localhost:8080
+slice.protomaps.dev {
+    root * /mnt/www
+
+    handle /api/* {
+        reverse_proxy localhost:8080
+    }
+
+    handle {
+        header {
+            Access-Control-Allow-Origin "*"
+        }
         file_server
+    }
 }
