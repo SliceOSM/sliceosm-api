@@ -25,11 +25,11 @@ Options:
 ### Quickstart example
 
 ```sh
-curl -X POST https://slice.protomaps.dev/api/ -d '{"Name":"none","RegionType":"geojson","RegionData":{"type":"Polygon","coordinates":[[[-77.4571,37.5530],[-77.4571,37.5272],[-77.4133,37.5272],[-77.4133,37.5530],[-77.4571,37.5530]]]}}'
+curl -X POST https://slice.openstreetmap.us/api/ -d '{"Name":"none","RegionType":"geojson","RegionData":{"type":"Polygon","coordinates":[[[-77.4571,37.5530],[-77.4571,37.5272],[-77.4133,37.5272],[-77.4133,37.5530],[-77.4571,37.5530]]]}}'
 # 2637da98-20a1-428f-b6db-18ac2861b763
-curl https://slice.protomaps.dev/api/2637da98-20a1-428f-b6db-18ac2861b763
+curl https://slice.openstreetmap.us/api/2637da98-20a1-428f-b6db-18ac2861b763
 # when Complete is true, fetch the file:
-curl https://slice.protomaps.dev/files/2637da98-20a1-428f-b6db-18ac2861b763.osm.pbf -o out.osm.pbf
+curl https://slice.openstreetmap.us/files/2637da98-20a1-428f-b6db-18ac2861b763.osm.pbf -o out.osm.pbf
 ```
 
 ### GET `/`
