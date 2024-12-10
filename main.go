@@ -5,6 +5,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/getsentry/sentry-go"
@@ -251,36 +252,73 @@ func GetPixel(image image.Image, z int, x int, y int) float64 {
 	}
 }
 
+func parseInput(body io.Reader) (orb.Geometry, string, string, json.RawMessage, error) {
+	decoder := json.NewDecoder(body)
+
+	var input Input
+	err := decoder.Decode(&input)
+	if err != nil {
+		return nil, "", "", nil, errors.New("input GeoJSON is invalid")
+	}
+
+	var geom orb.Geometry
+	var sanitizedData json.RawMessage
+
+	if input.RegionType == "geojson" {
+		geojsonGeom, err := geojson.UnmarshalGeometry(input.RegionData)
+		if err != nil {
+			return nil, "", "", nil, errors.New("input GeoJSON is invalid")
+		}
+		geom = geojsonGeom.Geometry()
+		switch v := geom.(type) {
+		case orb.Polygon:
+			if len(v) == 0 {
+				return nil, "", "", nil, errors.New("geom does not have enough rings")
+			}
+			for _, ring := range v {
+				if len(ring) < 4 {
+					return nil, "", "", nil, errors.New("ring does not have enough coordinates")
+				}
+			}
+		case orb.MultiPolygon:
+			if len(v) == 0 {
+				return nil, "", "", nil, errors.New("geom does not have enough rings")
+			}
+			for _, polygon := range v {
+				if len(polygon) == 0 {
+					return nil, "", "", nil, errors.New("geom does not have enough rings")
+				}
+				for _, ring := range polygon {
+					if len(ring) < 4 {
+						return nil, "", "", nil, errors.New("ring does not have enough coordinates")
+					}
+				}
+			}
+		}
+		sanitizedData, _ = geojsonGeom.MarshalJSON()
+	} else if input.RegionType == "bbox" {
+		var coords []float64
+		json.Unmarshal(input.RegionData, &coords)
+		if len(coords) < 4 {
+			return nil, "", "", nil, errors.New("input does not have >3 coordinates")
+		}
+		geom = orb.MultiPoint{orb.Point{coords[1], coords[0]}, orb.Point{coords[3], coords[2]}}.Bound()
+		sanitizedData, _ = json.Marshal(coords[0:4])
+	} else {
+		return nil, "", "", nil, errors.New("invalid input RegionType")
+	}
+
+	return geom, input.Name, input.RegionType, sanitizedData, nil
+}
+
 // check the filesystem for the result JSON
 // if it's not started yet, return the position in the queue
 func (h *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	if r.Method == "POST" {
-		decoder := json.NewDecoder(r.Body)
+		geom, sanitized_name, sanitized_type, sanitized_region, err := parseInput(r.Body)
 
-		var input Input
-		err := decoder.Decode(&input)
 		if err != nil {
-			panic(err)
-		}
-
-		var geom orb.Geometry
-		var sanitizedData json.RawMessage
-		// validate input
-		if input.RegionType == "geojson" {
-			geojsonGeom, _ := geojson.UnmarshalGeometry(input.RegionData)
-			geom = geojsonGeom.Geometry()
-			sanitizedData, _ = geojsonGeom.MarshalJSON()
-		} else if input.RegionType == "bbox" {
-			var coords []float64
-			json.Unmarshal(input.RegionData, &coords)
-			if len(coords) < 4 {
-				w.WriteHeader(400)
-				return
-			}
-			geom = orb.MultiPoint{orb.Point{coords[1], coords[0]}, orb.Point{coords[3], coords[2]}}.Bound()
-			sanitizedData, _ = json.Marshal(coords[0:4])
-		} else {
 			w.WriteHeader(400)
 			return
 		}
@@ -291,10 +329,7 @@ func (h *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// todo: sanitize name
-		// end validate input
-
-		task := Task{Uuid: uuid.New().String(), SanitizedName: input.Name, SanitizedRegionType: input.RegionType, SanitizedRegionData: sanitizedData}
+		task := Task{Uuid: uuid.New().String(), SanitizedName: sanitized_name, SanitizedRegionType: sanitized_type, SanitizedRegionData: sanitized_region}
 
 		select {
 		case h.queue <- task:
