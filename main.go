@@ -15,6 +15,7 @@ import (
 	"github.com/paulmach/orb/geojson"
 	"github.com/paulmach/orb/maptile"
 	"github.com/paulmach/orb/maptile/tilecover"
+	"github.com/paulmach/orb/planar"
 	"image"
 	"image/png"
 	"io"
@@ -306,6 +307,10 @@ func parseInput(body io.Reader) (orb.Geometry, string, string, json.RawMessage, 
 		sanitizedData, _ = json.Marshal(coords[0:4])
 	} else {
 		return nil, "", "", nil, errors.New("invalid input RegionType")
+	}
+
+	if planar.Area(geom) == 0.0 {
+		return nil, "", "", nil, errors.New("Input has 0 area")
 	}
 
 	return geom, input.Name, input.RegionType, sanitizedData, nil

@@ -34,6 +34,16 @@ func TestInvalidGeoJSON(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
+func TestZeroAreaGeoJSON(t *testing.T) {
+	_, _, _, _, err := parseInput(strings.NewReader(`{"Name":"a_name", "RegionType":"geojson", "RegionData":{"type":"Polygon","coordinates":[[[0,0],[1,1],[1,1],[0,0]]]}}`))
+	assert.NotNil(t, err)
+}
+
+func TestZeroAreaBbox(t *testing.T) {
+	_, _, _, _, err := parseInput(strings.NewReader(`{"Name":"a_name", "RegionType":"bbox", "RegionData":[0,0,0,0]}`))
+	assert.NotNil(t, err)
+}
+
 func TestMalformedGeoJSON(t *testing.T) {
 	_, _, _, _, err := parseInput(strings.NewReader(`{"Name":"a_name", "RegionType":"geojson", "RegionData":[}`))
 	assert.NotNil(t, err)
