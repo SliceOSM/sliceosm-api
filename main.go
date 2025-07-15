@@ -40,6 +40,7 @@ var imageBytes []byte
 
 // global system state.
 type SystemState struct {
+	Status     string
 	QueueSize  int
 	NodesLimit int
 	Timestamp  string
@@ -79,7 +80,7 @@ type Progress struct {
 	Complete  bool
 }
 
-type server struct {
+type Server struct {
 	progress      map[string]Progress
 	progressMutex sync.RWMutex
 	queue         chan Task
@@ -90,12 +91,16 @@ type server struct {
 	image         image.Image
 	nodesLimit    int
 
-	timestampMutex    sync.Mutex
-	lastTimestampTime time.Time
-	lastTimestamp     string
+	lastUpdated LastUpdated
 }
 
-func (h *server) runTask(id int, task Task) error {
+type LastUpdated struct {
+	mutex     sync.Mutex
+	timestamp time.Time
+	checkedAt time.Time
+}
+
+func (h *Server) runTask(id int, task Task) error {
 	uuid := task.Uuid
 	fmt.Println("worker", id, "started job", uuid)
 	start := time.Now()
@@ -188,7 +193,7 @@ func (h *server) runTask(id int, task Task) error {
 	return nil
 }
 
-func (h *server) worker(id int, queue chan Task) {
+func (h *Server) worker(id int, queue chan Task) {
 	for task := range queue {
 		h.progressMutex.Lock()
 		h.progress[task.Uuid] = Progress{}
@@ -203,7 +208,7 @@ func (h *server) worker(id int, queue chan Task) {
 	}
 }
 
-func (h *server) StartWorkers() {
+func (h *Server) StartWorkers() {
 	h.queue = make(chan Task, 512)
 	h.progress = make(map[string]Progress)
 
@@ -318,7 +323,7 @@ func parseInput(body io.Reader) (orb.Geometry, string, string, json.RawMessage, 
 
 // check the filesystem for the result JSON
 // if it's not started yet, return the position in the queue
-func (h *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	if r.Method == "POST" {
 		geom, sanitized_name, sanitized_type, sanitized_region, err := parseInput(r.Body)
@@ -351,22 +356,29 @@ func (h *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api" || r.URL.Path == "/api/" {
 			l := len(h.queue)
 
-			var timestamp string
-			h.timestampMutex.Lock()
+			h.lastUpdated.mutex.Lock()
 
-			if time.Since(h.lastTimestampTime).Seconds() > 10 {
+			if time.Since(h.lastUpdated.checkedAt).Seconds() > 10 {
 				cmd := exec.Command(h.exec, "query", h.data, "timestamp")
 				timestampRaw, _ := cmd.Output()
-				timestamp = strings.TrimSpace(string(timestampRaw))
-				h.lastTimestampTime = time.Now()
-				h.lastTimestamp = timestamp
-			} else {
-				timestamp = h.lastTimestamp
+				timestamp, err := time.Parse(time.RFC3339, strings.TrimSpace(string(timestampRaw)))
+				if err == nil {
+					h.lastUpdated.timestamp = timestamp
+					h.lastUpdated.checkedAt = time.Now()
+				}
 			}
-			h.timestampMutex.Unlock()
+
+			timestamp := h.lastUpdated.timestamp
+			h.lastUpdated.mutex.Unlock()
 
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(SystemState{l, h.nodesLimit, timestamp})
+
+			status := "ok"
+			if time.Now().Sub(timestamp).Minutes() > 15 {
+				status = "warn"
+			}
+
+			json.NewEncoder(w).Encode(SystemState{status, l, h.nodesLimit, timestamp.Format(time.RFC3339)})
 		} else if r.URL.Path == "/api/nodes.png" {
 			w.Header().Set("Content-Type", "image/png")
 			w.Write(imageBytes)
@@ -456,7 +468,7 @@ func main() {
 		return
 	}
 
-	srv := server{
+	srv := Server{
 		filesDir:   filesDir,
 		tmpDir:     tmpDir,
 		exec:       exec,
